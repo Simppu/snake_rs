@@ -1,4 +1,4 @@
-use std::{ops::Range, time::Duration};
+use std::{ops::Range, time::{self, Duration, Instant}};
 
 use interprocess::local_socket::{
     tokio::{prelude::*, RecvHalf, SendHalf, Stream}, GenericFilePath, GenericNamespaced, ToNsName
@@ -17,7 +17,7 @@ const NUM_INSTANCES_PER_ROW: u32 = 2;
 const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0, NUM_INSTANCES_PER_ROW as f32 * 0.5);
 
 
-const SPEED: f32 = 0.2;
+const SPEED: f32 = 0.1;
 
 
 pub struct State {
@@ -49,15 +49,16 @@ pub struct State {
     pub direction: Option<SnakeInputs>,
     pub last_direction: u32,
     pub first_direction: u32,
-    pub directions: Vec<SnakeInputs>
+    pub directions: Vec<SnakeInputs>,
+    pub last_updated: Instant
 }
 
 const VERTICES: &[Vertex] = &[
     // Changed
-    Vertex { position: [-0.1, 0.1, 0.0], tex_coords: [-1.0, 1.0], }, // A
-    Vertex { position: [-0.1, -0.1, 0.0], tex_coords: [-1.0, -1.0], }, // B
-    Vertex { position: [0.1, -0.1, 0.0], tex_coords: [1.0, -1.0], }, // C
-    Vertex { position: [0.1, 0.1, 0.0], tex_coords: [1.0, 1.0], }, // D
+    Vertex { position: [-0.05, 0.05, 0.0], tex_coords: [-1.0, 1.0], }, // A
+    Vertex { position: [-0.05, -0.05, 0.0], tex_coords: [-1.0, -1.0], }, // B
+    Vertex { position: [0.05, -0.05, 0.0], tex_coords: [1.0, -1.0], }, // C
+    Vertex { position: [0.05, 0.05, 0.0], tex_coords: [1.0, 1.0], }, // D
 ];
 
 
@@ -102,11 +103,11 @@ impl State {
                 rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
             },
             Instance {
-                position: cgmath::Vector3 { x: 0.2, y: 0.0, z: 0.0 },
+                position: cgmath::Vector3 { x: 0.1, y: 0.0, z: 0.0 },
                 rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
             },
             Instance {
-                position: cgmath::Vector3 { x: 0.4, y: 0.0, z: 0.0 },
+                position: cgmath::Vector3 { x: 0.2, y: 0.0, z: 0.0 },
                 rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
             }
 
@@ -449,7 +450,8 @@ impl State {
             direction: None,
             last_direction,
             first_direction: 0,
-            directions: vec![SnakeInputs::Left, SnakeInputs::Left]
+            directions: vec![SnakeInputs::Left, SnakeInputs::Left],
+            last_updated: Instant::now()
         }
     }
 
@@ -551,6 +553,7 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        
         //match &self.direction {
         //    Some(d) => {
         //        self.instances[self.last_direction as usize].position = self.instances[self.first_direction as usize].position;
@@ -579,28 +582,42 @@ impl State {
         //    },
         //    None => {},
         //}
-        eprintln!("Directions: {:?}", self.directions);
+        //eprintln!("Position: {:?}", self.instances[0].position);
         #[allow(clippy::single_match)]
         match self.direction {
             Some(d) => {
                 
-                self.directions.insert(0, d);
-                if self.directions.len() > self.instances.len() {
-                    self.directions.pop();
-                }
-                let mut i = 0;
-                while i < self.directions.len() {
-                    match self.directions[i] {
-                        SnakeInputs::Up => {
-                                
-                            self.instances[i].position.y += SPEED;
-                        },
-                        SnakeInputs::Down => {self.instances[i].position.y -= SPEED;},
-                        SnakeInputs::Left => {self.instances[i].position.x -= SPEED;},
-                        SnakeInputs::Right => {self.instances[i].position.x += SPEED;},
+                
+                if self.last_updated.elapsed() >= Duration::from_millis(64) {
+                    self.directions.insert(0, d);
+                    if self.directions.len() > self.instances.len() {
+                        self.directions.pop();
                     }
-                    i += 1;
+                    let mut i = 0;
+                    while i < self.directions.len() {
+                        match self.directions[i] {
+                            SnakeInputs::Up => {
 
+                                self.instances[i].position.y += SPEED;
+                                if self.instances[i].position.y > 1.2 {self.instances[i].position.y = -1.1}
+                            },
+                            SnakeInputs::Down => {
+                                self.instances[i].position.y -= SPEED;
+                                if self.instances[i].position.y < -1.2 {self.instances[i].position.y = 1.1}
+                            },
+                            SnakeInputs::Left => {
+                                self.instances[i].position.x -= SPEED;
+                                if self.instances[i].position.x < -1.2 {self.instances[i].position.x = 1.1}
+                            },
+                            SnakeInputs::Right => {
+                                self.instances[i].position.x += SPEED;
+                                if self.instances[i].position.x > 1.2 {self.instances[i].position.x = -1.1}
+                            },
+                        }
+                        i += 1;
+
+                    }
+                    self.last_updated = Instant::now();
                 }
             },
             None => {
@@ -701,7 +718,7 @@ pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
     // Submit the commands
     self.queue.submit(std::iter::once(encoder.finish()));
     output.present();
-    std::thread::sleep(Duration::from_millis(100));
+    //std::thread::sleep(Duration::from_millis(100));
     Ok(())
 }
 
