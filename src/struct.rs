@@ -50,17 +50,27 @@ pub struct State {
     pub last_direction: u32,
     pub first_direction: u32,
     pub directions: Vec<SnakeInputs>,
-    pub last_updated: Instant
+    pub last_updated: Instant,
+    pub apple_vertex_buffer: wgpu::Buffer,
+    pub apple_instances_buffer: wgpu::Buffer,
+    pub apple_instances: Vec<Instance>
 }
 
 const VERTICES: &[Vertex] = &[
     // Changed
-    Vertex { position: [-0.05, 0.05, 0.0], tex_coords: [-1.0, 1.0], }, // A
-    Vertex { position: [-0.05, -0.05, 0.0], tex_coords: [-1.0, -1.0], }, // B
-    Vertex { position: [0.05, -0.05, 0.0], tex_coords: [1.0, -1.0], }, // C
-    Vertex { position: [0.05, 0.05, 0.0], tex_coords: [1.0, 1.0], }, // D
+    Vertex { position: [-0.05, 0.05, 0.0], tex_coords: [0.0, 0.0], }, // A
+    Vertex { position: [-0.05, -0.05, 0.0], tex_coords: [0.0, 0.0], }, // B
+    Vertex { position: [0.05, -0.05, 0.0], tex_coords: [0.0, 0.0], }, // C
+    Vertex { position: [0.05, 0.05, 0.0], tex_coords: [0.0, 0.0], }, // D
 ];
 
+const APPLE_VERTICES: &[Vertex] = &[
+    // Changed
+    Vertex { position: [-0.05, 0.05, 0.0], tex_coords: [1.0, 1.0], }, // A
+    Vertex { position: [-0.05, -0.05, 0.0], tex_coords: [1.0, 1.0], }, // B
+    Vertex { position: [0.05, -0.05, 0.0], tex_coords: [1.0, 1.0], }, // C
+    Vertex { position: [0.05, 0.05, 0.0], tex_coords: [1.0, 1.0], }, // D
+];
 
 
 const INDICES: &[u16] = &[
@@ -113,6 +123,12 @@ impl State {
 
         ];
         
+        let apple_instances = vec![
+            Instance {
+                position: cgmath::Vector3 { x: 0.0, y: 0.2, z: 0.0 },
+                rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+            }
+        ];
         
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
@@ -184,6 +200,16 @@ impl State {
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             }
         );
+
+        let apple_instance_data = apple_instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let apple_instances_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Apple instance Buffer"),
+                contents: bytemuck::cast_slice(&apple_instance_data),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+
 
         let camera = Camera {
             // position the camera 1 unit up and 2 units back
@@ -363,6 +389,14 @@ impl State {
             }
         );
 
+        let apple_vertex_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Apple vertex Buffer"),
+                contents: bytemuck::cast_slice(APPLE_VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
+
         let index_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Index Buffer"),
@@ -451,7 +485,10 @@ impl State {
             last_direction,
             first_direction: 0,
             directions: vec![SnakeInputs::Left, SnakeInputs::Left],
-            last_updated: Instant::now()
+            last_updated: Instant::now(),
+            apple_vertex_buffer,
+            apple_instances,
+            apple_instances_buffer
         }
     }
 
@@ -706,13 +743,20 @@ pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+
+        // Snake rendering
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        // NEW!
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
         // UPDATED!
         render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+
+        // Apple rendering
+        render_pass.set_vertex_buffer(0, self.apple_vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(1, self.apple_instances_buffer.slice(..));
+        render_pass.draw_indexed(0..self.num_indices, 0, 0..self.apple_instances.len() as _);
+
     }
 
     // Submit the commands
