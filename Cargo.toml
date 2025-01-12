@@ -41,3 +41,10 @@ crate-type = ["cdylib", "rlib"]
 version = "0.24"
 default-features = false
 features = ["png", "jpeg"]
+
+[profile.release]
+strip = true  # Automatically strip symbols from the binary.
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
