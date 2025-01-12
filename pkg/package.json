@@ -4,13 +4,11 @@
   "files": [
     "rendering_bg.wasm",
     "rendering.js",
-    "rendering_bg.js",
     "rendering.d.ts"
   ],
   "module": "rendering.js",
   "types": "rendering.d.ts",
   "sideEffects": [
-    "./rendering.js",
     "./snippets/*"
   ]
 }

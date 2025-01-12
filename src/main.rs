@@ -3,7 +3,7 @@ use rendering::run;
 
 
 #[cfg(target_arch="wasm32")] 
-use wasm_lib::run;
+use rendering::wasm_lib::run;
 
 
 

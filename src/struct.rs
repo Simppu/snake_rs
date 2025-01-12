@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use rand::{distributions::Uniform, prelude::Distribution};
 use wgpu::{util::DeviceExt, Color};
 // lib.rs
-use winit::{event::{KeyboardInput, VirtualKeyCode, WindowEvent}, window::Window};
+use winit::{event::{ElementState, KeyEvent, WindowEvent}, keyboard::{Key, KeyCode, NamedKey, PhysicalKey, SmolStr}, window::Window};
 use crate::{camera::{Camera, CameraStaging, CameraUniform}, snake::{Instance, InstanceRaw}, SnakeInputs};
 use crate::texture;
 use cgmath::prelude::*;
@@ -11,8 +11,8 @@ use cgmath::prelude::*;
 const SPEED: f32 = 0.1;
 
 
-pub struct State {
-    pub surface: wgpu::Surface,
+pub struct State<'a> {
+    pub surface: wgpu::Surface<'a>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
@@ -20,7 +20,7 @@ pub struct State {
     // The window must be declared after the surface so
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
-    pub window: Window,
+    pub window: &'a Window,
     pub clear_color: Color,
     pub render_pipeline: wgpu::RenderPipeline,
     pub vertex_buffer: wgpu::Buffer,
@@ -79,9 +79,10 @@ struct Vertex {
 }
 
 
-impl State {
+impl<'a> State<'a> {
+    
     // Creating some of the wgpu types requires async code
-    pub async fn new(window: Window) -> Self {
+    pub async fn new(window: &'a Window) -> Self {
         let size = window.inner_size();
         let instances = vec![
             Instance {
@@ -119,7 +120,7 @@ impl State {
         //
         // The surface needs to live as long as the window that created it.
         // State owns the window, so this should be safe.
-        let surface = unsafe { instance.create_surface(&window) }.unwrap();
+        let surface = instance.create_surface(window).unwrap();
 
         let adapter = instance.request_adapter(
             &wgpu::RequestAdapterOptions {
@@ -132,15 +133,16 @@ impl State {
 
         let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor {
-                features: wgpu::Features::empty(),
+                required_features: wgpu::Features::empty(),
                 // WebGL doesn't support all of wgpu's features, so if
                 // we're building for the web, we'll have to disable some.
-                limits: if cfg!(target_arch = "wasm32") {
+                required_limits: if cfg!(target_arch = "wasm32") {
                     wgpu::Limits::downlevel_webgl2_defaults()
                 } else {
                     wgpu::Limits::default()
                 },
                 label: None,
+                memory_hints: Default::default(),
             },
             None, // Trace path
         ).await.unwrap();
@@ -160,6 +162,7 @@ impl State {
             present_mode: surface_caps.present_modes[0],
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
+            desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
 
@@ -330,6 +333,7 @@ impl State {
                 buffers: &[
                     Vertex::desc(), InstanceRaw::desc()
                 ], // 2.
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState { // 3.
                 module: &shader,
@@ -339,6 +343,7 @@ impl State {
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList, // 1.
                 strip_index_format: None,
@@ -357,6 +362,7 @@ impl State {
                 alpha_to_coverage_enabled: false, // 4.
             },
             multiview: None, // 5.
+            cache: None
         });
 
         let vertex_buffer = device.create_buffer_init(
@@ -464,61 +470,82 @@ impl State {
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        state: ElementState::Pressed,
+                        physical_key,
+                        ..
+                    },..} => {
+                        match physical_key {
+                            PhysicalKey::Code(KeyCode::KeyW) if self.direction != Some(SnakeInputs::Down) => {self.direction = Some(SnakeInputs::Up);},
+                            PhysicalKey::Code(KeyCode::KeyA) if self.direction != Some(SnakeInputs::Right) => {self.direction = Some(SnakeInputs::Left);},
+                            PhysicalKey::Code(KeyCode::KeyS) if self.direction != Some(SnakeInputs::Up) => {self.direction = Some(SnakeInputs::Down);},
+                            PhysicalKey::Code(KeyCode::KeyD) if self.direction != Some(SnakeInputs::Left)=> {self.direction = Some(SnakeInputs::Right);},
+                            _=> {return false;}
+                        }
+                    },
+            _=> {
+                return false;
+            }
+        }
+
+        false
         //let s = serde_json::to_string(&Signal::Input).unwrap() + "\n";
         
         //pollster::block_on(self.sender.write_all(s.as_bytes())).unwrap();
-        match event {
-            WindowEvent::KeyboardInput { input: KeyboardInput { 
-                virtual_keycode, ..
-            }, 
-            .. 
-        } => {
-            match virtual_keycode {
-                Some(k) => {
-                    if self.ended {
-                        return false;
-                    }
-                    match k {
-                        VirtualKeyCode::W if self.direction != Some(SnakeInputs::Down) => {
-                            self.direction = Some(SnakeInputs::Up);
-                            
-                            return false;
-                        },
-                        VirtualKeyCode::S if self.direction != Some(SnakeInputs::Up) => {
-                            self.direction = Some(SnakeInputs::Down);
-                            return false;
-                        },
-                        VirtualKeyCode::A if self.direction != Some(SnakeInputs::Right) => {
-                            self.direction = Some(SnakeInputs::Left);
-                            return false;
-                        },
-                        VirtualKeyCode::D if self.direction != Some(SnakeInputs::Left) => {
-                            self.direction = Some(SnakeInputs::Right);
-                            return false;
-                        }
-                        
-
-                        _=> {
-                            
-                        }
-                        
-                    }
-                    
-                    
-
-                    return false;
-                    
-                },
-                None => {},
-            }
-            
-            
-            false
-        },
-            _ => {
-                false
-            }
-        }
+        //match event { => {
+        //    
+        //            match *logical_key {
+        //                
+        //                Key::Character(c) => {
+        //                    let w = SmolStr::new("w");
+        //                    let a = SmolStr::new("a");
+        //                    let s = SmolStr::new("s");
+        //                    let d = SmolStr::new("d");
+        //                    match c {
+        //                        w if self.direction != Some(SnakeInputs::Down) => {
+        //                    
+        //                            self.direction = Some(SnakeInputs::Up);
+        //                            
+        //                            return false;
+        //                        },
+        //                        s if self.direction != Some(SnakeInputs::Up) => {
+        //                            self.direction = Some(SnakeInputs::Down);
+        //                            return false;
+        //                        },
+        //                        a if self.direction != Some(SnakeInputs::Right) => {
+        //                            self.direction = Some(SnakeInputs::Left);
+        //                            return false;
+        //                        },
+        //                        d if self.direction != Some(SnakeInputs::Left) => {
+        //                            self.direction = Some(SnakeInputs::Right);
+        //                            return false;
+        //                        },
+        //                        _=> {
+        //                            return false;
+        //                        }
+        //                    }
+        //                }
+        //                
+        //                
+        //                _=> {
+        //                    return false;
+        //                }
+        //                
+        //            }
+        //            
+        //            
+//
+        //            return false;
+        //    }
+        //    
+        //    _=> {
+        //        false
+        //    }
+        //    
+        //}
 
 
         

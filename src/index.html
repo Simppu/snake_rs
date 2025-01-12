@@ -2,13 +2,13 @@
 <html lang="en-US">
   <head>
     <meta charset="utf-8" />
-    <title>hello-wasm example</title>
+    <title>Snake rs wasm edition</title>
   </head>
   <body>
     <script type="module">
-      import init, { greet } from "./pkg/hello_wasm.js";
+      import init, { greet } from "./pkg/rendering.js";
       init().then(() => {
-        greet("WebAssembly");
+        greet("Snake");
       });
     </script>
   </body>
