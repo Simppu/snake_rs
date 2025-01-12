@@ -1,21 +1,12 @@
-use std::{ops::Range, time::{self, Duration, Instant}};
+use std::time::{Duration, Instant};
 
-use interprocess::local_socket::{
-    tokio::{prelude::*, RecvHalf, SendHalf, Stream}, GenericFilePath, GenericNamespaced, ToNsName
-};
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader}, sync::mpsc::Sender, try_join
-};
+use rand::{distributions::Uniform, prelude::Distribution};
 use wgpu::{util::DeviceExt, Color};
 // lib.rs
-use winit::{dpi::LogicalPosition, event::{KeyboardInput, VirtualKeyCode, WindowEvent}, window::Window};
-use crate::{camera::{Camera, CameraStaging, CameraUniform}, snake::{DrawModel, Instance, InstanceRaw, Mesh}, SnakeInputs};
+use winit::{event::{KeyboardInput, VirtualKeyCode, WindowEvent}, window::Window};
+use crate::{camera::{Camera, CameraStaging, CameraUniform}, snake::{Instance, InstanceRaw}, SnakeInputs};
 use crate::texture;
 use cgmath::prelude::*;
-
-const NUM_INSTANCES_PER_ROW: u32 = 2;
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0, NUM_INSTANCES_PER_ROW as f32 * 0.5);
-
 
 const SPEED: f32 = 0.1;
 
@@ -44,8 +35,6 @@ pub struct State {
     pub camera_staging: CameraStaging,
     pub instances: Vec<Instance>,
     pub instance_buffer: wgpu::Buffer,
-    pub meshes: Vec<Mesh>,
-    pub input_sender: Sender<SnakeInputs>,
     pub direction: Option<SnakeInputs>,
     pub last_direction: u32,
     pub first_direction: u32,
@@ -53,7 +42,8 @@ pub struct State {
     pub last_updated: Instant,
     pub apple_vertex_buffer: wgpu::Buffer,
     pub apple_instances_buffer: wgpu::Buffer,
-    pub apple_instances: Vec<Instance>
+    pub apple_instances: Vec<Instance>,
+    pub ended: bool,
 }
 
 const VERTICES: &[Vertex] = &[
@@ -79,20 +69,6 @@ const INDICES: &[u16] = &[
 ];
 
 
-const MESH_VERTICES: &[Vertex] = &[
-    // Changed
-    Vertex { position: [-0.1, 0.1, 0.0], tex_coords: [-1.0, 1.0], }, // A
-    Vertex { position: [-0.1, -0.1, 0.0], tex_coords: [-1.0, -1.0], }, // B
-    Vertex { position: [0.1, -0.1, 0.0], tex_coords: [1.0, -1.0], }, // C
-    Vertex { position: [0.1, 0.1, 0.0], tex_coords: [1.0, 1.0], }, // D
-];
-
-
-
-const MESH_INDICES: &[u16] = &[
-    0, 1, 2,
-    0, 2, 3,
-];
 
 
 #[repr(C)]
@@ -105,7 +81,7 @@ struct Vertex {
 
 impl State {
     // Creating some of the wgpu types requires async code
-    pub async fn new(window: Window, send: Sender<SnakeInputs>) -> Self {
+    pub async fn new(window: Window) -> Self {
         let size = window.inner_size();
         let instances = vec![
             Instance {
@@ -115,17 +91,19 @@ impl State {
             Instance {
                 position: cgmath::Vector3 { x: 0.1, y: 0.0, z: 0.0 },
                 rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
-            },
-            Instance {
-                position: cgmath::Vector3 { x: 0.2, y: 0.0, z: 0.0 },
-                rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
             }
 
         ];
-        
+        let step = Uniform::new(-9, 10);
+        let mut rng = rand::thread_rng();
+        let choice = step.sample(&mut rng);
+        let x = choice as f32 * SPEED;
+        let choice = step.sample(&mut rng);
+        let y = choice as f32 * SPEED;
+
         let apple_instances = vec![
             Instance {
-                position: cgmath::Vector3 { x: 0.0, y: 0.2, z: 0.0 },
+                position: cgmath::Vector3 { x, y, z: 0.0 },
                 rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
             }
         ];
@@ -264,7 +242,7 @@ impl State {
             label: Some("camera_bind_group"),
         });
 
-        let diffuse_bytes = include_bytes!("happy-tree.png");
+        let diffuse_bytes = include_bytes!("snake_atlas.png");
         let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
         let diffuse_rgba = diffuse_image.to_rgba8();
 
@@ -277,7 +255,7 @@ impl State {
             depth_or_array_layers: 1,
         };
 
-        let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap();
+        let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "snake_atlas.png").unwrap();
         
         let diffuse_texture_view = diffuse_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -406,29 +384,6 @@ impl State {
         );
         let num_indices = INDICES.len() as u32;
 
-        let mesh_vertex_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Mesh Vertex Buffer"),
-                contents: bytemuck::cast_slice(MESH_VERTICES),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
-
-        let mesh_index_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Mesh Index Buffer"),
-                contents: bytemuck::cast_slice(MESH_INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            }
-        );
-        
-        let mesh = Mesh {
-            name: "square".to_owned(),
-            vertex_buffer: mesh_vertex_buffer,
-            index_buffer: mesh_index_buffer,
-            elements: 1,
-        };
-
 
 
 
@@ -456,7 +411,6 @@ impl State {
         
         let camera_staging = CameraStaging::new(camera);
 
-        let meshes = vec![mesh];
         let last_direction = (instances.len()-1) as u32;
 
         Self {
@@ -479,16 +433,15 @@ impl State {
             camera_staging,
             instances,
             instance_buffer,
-            meshes,
-            input_sender: send,
             direction: None,
             last_direction,
             first_direction: 0,
-            directions: vec![SnakeInputs::Left, SnakeInputs::Left],
+            directions: vec![SnakeInputs::Left],
             last_updated: Instant::now(),
             apple_vertex_buffer,
             apple_instances,
-            apple_instances_buffer
+            apple_instances_buffer,
+            ended: false
         }
     }
 
@@ -522,7 +475,9 @@ impl State {
         } => {
             match virtual_keycode {
                 Some(k) => {
-                    
+                    if self.ended {
+                        return false;
+                    }
                     match k {
                         VirtualKeyCode::W if self.direction != Some(SnakeInputs::Down) => {
                             self.direction = Some(SnakeInputs::Up);
@@ -560,25 +515,6 @@ impl State {
             
             false
         },
-            WindowEvent::AxisMotion { axis, value,.. }
-            => {
-                //eprintln!("Axis?: {}, value: {}", axis, value);
-                match axis {
-                    0 => {
-                        //self.camera_staging.camera.pitch = 1.0;
-                        
-                        
-                    },
-                    1 => {
-                        //self.camera_staging.camera.yaw = 0.001;
-                        
-                    },
-                    _=> {}
-                }
-                
-                
-                false
-            }
             _ => {
                 false
             }
@@ -590,36 +526,6 @@ impl State {
     }
 
     pub fn update(&mut self) {
-        
-        //match &self.direction {
-        //    Some(d) => {
-        //        self.instances[self.last_direction as usize].position = self.instances[self.first_direction as usize].position;
-        //        match d {
-        //            SnakeInputs::Up => {
-        //                
-        //                self.instances[self.last_direction as usize].position.y += 0.05;
-        //            },
-        //            SnakeInputs::Down => {self.instances[self.last_direction as usize].position.y -= 0.05;},
-        //            SnakeInputs::Left => {self.instances[self.last_direction as usize].position.x -= 0.05;},
-        //            SnakeInputs::Right => {self.instances[self.last_direction as usize].position.x += 0.05;},
-        //        }
-        //        //let i =  (self.instances.len() - 1) as u32;
-        //        //self.last_direction = if self.last_direction == 0 {
-        //        //    i
-        //        //} else {
-        //        //    self.last_direction - 1
-        //        //};
-////
-        //        //self.first_direction = if self.first_direction == i {
-        //        //    0
-        //        //} else {
-        //        //    self.first_direction + 1
-        //        //};
-//
-        //    },
-        //    None => {},
-        //}
-        //eprintln!("Position: {:?}", self.instances[0].position);
         #[allow(clippy::single_match)]
         match self.direction {
             Some(d) => {
@@ -631,29 +537,78 @@ impl State {
                         self.directions.pop();
                     }
                     let mut i = 0;
+                    let last_pos = self.instances.last().unwrap().position;
                     while i < self.directions.len() {
+                        
                         match self.directions[i] {
                             SnakeInputs::Up => {
 
                                 self.instances[i].position.y += SPEED;
-                                if self.instances[i].position.y > 1.2 {self.instances[i].position.y = -1.1}
+                                if self.instances[i].position.y >= 1.2 {self.instances[i].position.y = -1.2}
                             },
                             SnakeInputs::Down => {
                                 self.instances[i].position.y -= SPEED;
-                                if self.instances[i].position.y < -1.2 {self.instances[i].position.y = 1.1}
+                                if self.instances[i].position.y <= -1.2 {self.instances[i].position.y = 1.2}
                             },
                             SnakeInputs::Left => {
                                 self.instances[i].position.x -= SPEED;
-                                if self.instances[i].position.x < -1.2 {self.instances[i].position.x = 1.1}
+                                if self.instances[i].position.x <= -1.2 {self.instances[i].position.x = 1.2}
                             },
                             SnakeInputs::Right => {
                                 self.instances[i].position.x += SPEED;
-                                if self.instances[i].position.x > 1.2 {self.instances[i].position.x = -1.1}
+                                if self.instances[i].position.x >= 1.2 {self.instances[i].position.x = -1.2}
                             },
+                            SnakeInputs::Stay => {}
+                        }
+                        if i != 0 && self.instances[i].position == self.instances[0].position {
+                            self.direction = None;
+                            self.ended = true;
+
                         }
                         i += 1;
 
                     }
+                    //eprintln!("Apple pos: {:?}, Snake head pos: {:?}", self.apple_instances[0].position, self.instances[0].position);
+                    if (
+                        self.instances[0].position.x - self.apple_instances[0].position.x).abs() < 0.001
+                        && (self.instances[0].position.x - self.apple_instances[0].position.x).abs() > -0.001
+                        && (self.instances[0].position.y - self.apple_instances[0].position.y).abs() < 0.001
+                        && (self.instances[0].position.y - self.apple_instances[0].position.y).abs() > -0.001
+                      {
+                        self.instances.push(Instance { 
+                            position: last_pos, 
+                            rotation: self.instances.last().unwrap().rotation 
+                        });
+                        self.directions.push(SnakeInputs::Stay);
+                        //eprintln!("aple");
+                        let step = Uniform::new(-9, 10);
+                        loop {
+                            let mut rng = rand::thread_rng();
+                            let choice = step.sample(&mut rng);
+                            let x = choice as f32 * SPEED;
+                            let choice = step.sample(&mut rng);
+                            let y = choice as f32 * SPEED;
+                            
+                            if self.instances.iter().any(|i| {
+                                (i.position.x - x).abs() < 0.001
+                                &&  (i.position.x - x).abs() > -0.001
+                                &&  (i.position.y - y).abs() < 0.001
+                                &&  (i.position.y - y).abs() > -0.001
+                            }) {
+                                continue;
+                            } else {
+                                self.apple_instances[0].position = cgmath::Vector3 {x, y, z: 0.0};
+                                self.rebuild_apple_buffer();
+                                break;
+                            }
+                        
+                        }
+
+                        
+                        self.update_snake_length();
+                        
+                    }
+
                     self.last_updated = Instant::now();
                 }
             },
@@ -672,49 +627,6 @@ impl State {
 
         
     }
-
-//    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-//    let output = self.surface.get_current_texture()?;
-//    let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-//
-//    let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-//        label: Some("Render Encoder"),
-//    });
-//
-//    {
-//        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-//            label: Some("Render Pass"),
-//            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-//                view: &view,
-//                resolve_target: None,
-//                ops: wgpu::Operations {
-//                    load: wgpu::LoadOp::Clear(self.clear_color),
-//                    store: wgpu::StoreOp::Store,
-//                },
-//            })],
-//            depth_stencil_attachment: None,
-//        });
-//
-//        render_pass.set_pipeline(&self.render_pipeline);
-//
-//        // Set bind groups
-//        render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-//        render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-//
-//        // Set vertex and index buffers
-//        render_pass.set_vertex_buffer(0, self.meshes[0].vertex_buffer.slice(..));
-//        render_pass.set_index_buffer(self.meshes[0].index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-//
-//        // Draw the indexed vertices
-//        render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
-//    }
-//
-//    // Submit the commands
-//    self.queue.submit(std::iter::once(encoder.finish()));
-//    output.present();
-//
-//    Ok(())
-//}
 
 pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
     let output = self.surface.get_current_texture()?;
@@ -768,17 +680,44 @@ pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
 
     pub fn rebuild_instance_buffer(&mut self) {
         
+
         let instance_data = self.instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         
 
         
-
+        
         self.queue.write_buffer(
             &self.instance_buffer,
             0,
             bytemuck::cast_slice(&instance_data));
 
     }
+
+    pub fn update_snake_length(&mut self) {
+        let instance_data = self.instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let buf = self.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&instance_data),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+        self.instance_buffer = buf;
+
+    }
+
+    pub fn rebuild_apple_buffer(&mut self) {
+        let instance_data = self.apple_instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        
+
+        
+        
+        self.queue.write_buffer(
+            &self.apple_instances_buffer,
+            0,
+            bytemuck::cast_slice(&instance_data));
+    }
+
 
 }
 
