@@ -95,13 +95,15 @@ impl<'a> State<'a> {
             }
 
         ];
-        let step = Uniform::new(-9, 10);
-        let mut rng = rand::thread_rng();
-        let choice = step.sample(&mut rng);
-        let x = choice as f32 * SPEED;
-        let choice = step.sample(&mut rng);
-        let y = choice as f32 * SPEED;
-
+        
+        //let step = Uniform::new(-9, 10);
+        //let mut rng = rand::thread_rng();
+        //let choice = step.sample(&mut rng);
+        //let x = choice as f32 * SPEED;
+        //let choice = step.sample(&mut rng);
+        //let y = choice as f32 * SPEED;
+            let x = 0.4;
+            let y = 0.4;
         let apple_instances = vec![
             Instance {
                 position: cgmath::Vector3 { x, y, z: 0.0 },
@@ -608,13 +610,16 @@ impl<'a> State<'a> {
                         });
                         self.directions.push(SnakeInputs::Stay);
                         //eprintln!("aple");
-                        let step = Uniform::new(-9, 10);
+                        //let step = Uniform::new(-9, 10);
                         loop {
-                            let mut rng = rand::thread_rng();
-                            let choice = step.sample(&mut rng);
-                            let x = choice as f32 * SPEED;
-                            let choice = step.sample(&mut rng);
-                            let y = choice as f32 * SPEED;
+                            //let mut rng = rand::thread_rng();
+                            //let choice = step.sample(&mut rng);
+                            //let x = choice as f32 * SPEED;
+                            //let choice = step.sample(&mut rng);
+                            //let y = choice as f32 * SPEED;
+
+                            let x = 0.2;
+                            let y = 0.2;
                             
                             if self.instances.iter().any(|i| {
                                 (i.position.x - x).abs() < 0.001

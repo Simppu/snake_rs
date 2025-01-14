@@ -1,6 +1,5 @@
 
 use wasm_bindgen::prelude::*;
-
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
@@ -27,6 +26,16 @@ pub async fn run() {
     window.set_resizable(false);
     let mut state = State::new(&window).await;
     
+    web_sys::window()
+        .and_then(|win| win.document())
+        .and_then(|doc| {
+            let dst = doc.get_element_by_id("body")?;
+            let canvas = web_sys::Element::from(window.canvas().unwrap());
+            dst.append_child(&canvas).ok()?;
+            Some(())
+        })
+        .expect("Couldn't append canvas to document body.");
+
     event_loop.run(move |event, control_flow| {
         match event {
             
@@ -79,13 +88,6 @@ pub async fn run() {
     
     
     
-    web_sys::window()
-        .and_then(|win| win.document())
-        .and_then(|doc| {
-            let dst = doc.get_element_by_id("body")?;
-            let canvas = web_sys::Element::from(window.canvas().unwrap());
-            dst.append_child(&canvas).ok()?;
-            Some(())
-        })
-        .expect("Couldn't append canvas to document body.");
+    
 }
+
